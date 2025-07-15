@@ -1,0 +1,1 @@
+# Entities module for War Thunder Offline

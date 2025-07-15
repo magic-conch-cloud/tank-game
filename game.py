@@ -1,50 +1,68 @@
 import pygame
+from pygame.locals import *
+from OpenGL.GL import *
 import random
 import math
 from entities.tank import Tank
 from entities.enemy import Enemy
 from entities.bullet import Bullet
 from utils.constants import *
+from utils.math3d import Vector3, distance_3d
+from utils.renderer import Renderer
 
 class Game:
     def __init__(self):
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("War Thunder Offline")
-        self.clock = pygame.time.Clock()
-        self.running = True
+        # Initialize Pygame
+        pygame.init()
         
-        # Game objects
-        self.player = Tank(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100, PLAYER_COLOR)
-        self.enemies = []
-        self.bullets = []
-        self.enemy_bullets = []
+        # Set up display with OpenGL
+        self.screen_size = (SCREEN_WIDTH, SCREEN_HEIGHT)
+        pygame.display.set_mode(self.screen_size, DOUBLEBUF | OPENGL)
+        pygame.display.set_caption("War Thunder Offline - 3D")
+        
+        # Hide mouse cursor and capture it
+        pygame.mouse.set_visible(False)
+        pygame.event.set_grab(True)
+        
+        # Initialize 3D renderer
+        self.renderer = Renderer()
+        self.renderer.setup_perspective(SCREEN_WIDTH, SCREEN_HEIGHT)
         
         # Game state
+        self.clock = pygame.time.Clock()
+        self.running = True
+        self.game_over = False
+        self.paused = False
+        
+        # Initialize game objects
+        self.player = Tank(0, 0, PLAYER_COLOR, is_player=True)
+        self.enemies = []
+        self.bullets = []
+        
+        # Game stats
         self.score = 0
         self.enemy_spawn_timer = 0
-        self.game_over = False
         
-        # Fonts
+        # Camera system
+        self.camera_pos = Vector3(0, CAMERA_HEIGHT, -CAMERA_DISTANCE)
+        self.camera_target = Vector3(0, 0, 0)
+        self.camera_yaw = 0.0
+        self.camera_pitch = -0.3
+        
+        # Mouse control
+        self.mouse_sensitivity = MOUSE_SENSITIVITY
+        self.last_mouse_pos = pygame.mouse.get_pos()
+        
+        # UI
+        self.font_initialized = False
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup UI rendering"""
+        pygame.font.init()
         self.font = pygame.font.Font(None, 36)
         self.big_font = pygame.font.Font(None, 72)
-        
-        # Generate terrain
-        self.terrain = self.generate_terrain()
-        
-    def generate_terrain(self):
-        """Generate simple terrain as a list of heights"""
-        terrain = []
-        for x in range(0, SCREEN_WIDTH, 10):
-            height = random.randint(50, 150)
-            terrain.append((x, SCREEN_HEIGHT - height))
-        return terrain
-    
-    def spawn_enemy(self):
-        """Spawn a new enemy tank"""
-        x = random.randint(50, SCREEN_WIDTH - 50)
-        y = random.randint(50, 200)
-        enemy = Enemy(x, y)
-        self.enemies.append(enemy)
+        self.font_initialized = True
     
     def handle_events(self):
         """Handle pygame events"""
@@ -52,7 +70,14 @@ class Game:
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE and not self.game_over:
+                if event.key == pygame.K_ESCAPE:
+                    if self.game_over:
+                        self.running = False
+                    else:
+                        self.paused = not self.paused
+                        pygame.event.set_grab(not self.paused)
+                        pygame.mouse.set_visible(self.paused)
+                elif event.key == pygame.K_SPACE and not self.game_over and not self.paused:
                     # Player shoots
                     bullet = self.player.shoot()
                     if bullet:
@@ -60,172 +85,306 @@ class Game:
                 elif event.key == pygame.K_r and self.game_over:
                     # Restart game
                     self.restart_game()
+            elif event.type == pygame.MOUSEMOTION and not self.paused:
+                # Mouse look
+                mouse_x, mouse_y = event.pos
+                rel_x, rel_y = event.rel
+                
+                self.camera_yaw += rel_x * self.mouse_sensitivity
+                self.camera_pitch -= rel_y * self.mouse_sensitivity
+                
+                # Clamp pitch
+                self.camera_pitch = max(-math.pi/2 + 0.1, min(math.pi/2 - 0.1, self.camera_pitch))
     
     def update(self):
         """Update game state"""
-        if self.game_over:
+        if self.game_over or self.paused:
             return
-            
+        
         # Get pressed keys for continuous input
         keys = pygame.key.get_pressed()
         
         # Update player
         self.player.update(keys)
         
+        # Update camera to follow player
+        self.update_camera()
+        
         # Update bullets
         for bullet in self.bullets[:]:
-            bullet.update()
-            if bullet.y < 0 or bullet.y > SCREEN_HEIGHT:
+            if bullet.update():
                 self.bullets.remove(bullet)
-        
-        # Update enemy bullets
-        for bullet in self.enemy_bullets[:]:
-            bullet.update()
-            if bullet.y < 0 or bullet.y > SCREEN_HEIGHT:
-                self.enemy_bullets.remove(bullet)
         
         # Update enemies
         for enemy in self.enemies[:]:
-            enemy.update(self.player.x, self.player.y)
+            enemy.update(self.player.position)
             
             # Enemy shooting
-            if random.randint(1, 120) == 1:  # Random shooting
-                bullet = enemy.shoot(self.player.x, self.player.y)
+            if enemy.should_shoot():
+                bullet = enemy.shoot()
                 if bullet:
-                    self.enemy_bullets.append(bullet)
+                    self.bullets.append(bullet)
         
         # Spawn enemies
         self.enemy_spawn_timer += 1
-        if self.enemy_spawn_timer >= ENEMY_SPAWN_RATE:
+        if self.enemy_spawn_timer >= ENEMY_SPAWN_RATE and len(self.enemies) < MAX_ENEMIES:
             self.spawn_enemy()
             self.enemy_spawn_timer = 0
         
         # Check collisions
         self.check_collisions()
     
+    def update_camera(self):
+        """Update camera position to follow player"""
+        # Calculate camera position based on yaw and pitch
+        camera_distance = CAMERA_DISTANCE
+        
+        # Camera position relative to player
+        camera_x = math.sin(self.camera_yaw) * math.cos(self.camera_pitch) * camera_distance
+        camera_y = math.sin(self.camera_pitch) * camera_distance + CAMERA_HEIGHT
+        camera_z = math.cos(self.camera_yaw) * math.cos(self.camera_pitch) * camera_distance
+        
+        # Position camera relative to player
+        self.camera_pos = Vector3(
+            self.player.position.x + camera_x,
+            self.player.position.y + camera_y,
+            self.player.position.z + camera_z
+        )
+        
+        # Look at player
+        self.camera_target = Vector3(
+            self.player.position.x,
+            self.player.position.y + 1.0,
+            self.player.position.z
+        )
+    
+    def spawn_enemy(self):
+        """Spawn a new enemy tank"""
+        # Spawn enemy at random position around the edge of the world
+        angle = random.uniform(0, 2 * math.pi)
+        distance = random.uniform(30, WORLD_SIZE / 2 - 10)
+        
+        x = math.sin(angle) * distance
+        z = math.cos(angle) * distance
+        
+        enemy = Enemy(x, z)
+        self.enemies.append(enemy)
+    
     def check_collisions(self):
         """Check for collisions between objects"""
         # Player bullets hitting enemies
         for bullet in self.bullets[:]:
-            for enemy in self.enemies[:]:
-                if bullet.check_collision(enemy):
+            if bullet.is_player_bullet:
+                for enemy in self.enemies[:]:
+                    if bullet.check_collision(enemy):
+                        self.bullets.remove(bullet)
+                        if enemy.take_damage(BULLET_DAMAGE):
+                            self.enemies.remove(enemy)
+                            self.score += 100
+                        break
+            else:
+                # Enemy bullets hitting player
+                if bullet.check_collision(self.player):
                     self.bullets.remove(bullet)
-                    if enemy.take_damage(BULLET_DAMAGE):
-                        self.enemies.remove(enemy)
-                        self.score += 100
+                    if self.player.take_damage(BULLET_DAMAGE):
+                        self.game_over = True
                     break
         
-        # Enemy bullets hitting player
-        for bullet in self.enemy_bullets[:]:
-            if bullet.check_collision(self.player):
-                self.enemy_bullets.remove(bullet)
-                if self.player.take_damage(BULLET_DAMAGE):
-                    self.game_over = True
-                break
-        
-        # Enemies hitting player
+        # Enemies colliding with player
         for enemy in self.enemies:
             if self.player.check_collision(enemy):
                 if self.player.take_damage(COLLISION_DAMAGE):
                     self.game_over = True
                 break
     
-    def draw(self):
-        """Draw everything to the screen"""
+    def render(self):
+        """Render the 3D scene"""
         # Clear screen
-        self.screen.fill(SKY_COLOR)
+        self.renderer.clear_screen()
+        
+        # Set camera
+        self.renderer.set_camera(self.camera_pos, self.camera_target)
         
         # Draw terrain
-        if len(self.terrain) > 1:
-            pygame.draw.polygon(self.screen, GROUND_COLOR, 
-                               self.terrain + [(SCREEN_WIDTH, SCREEN_HEIGHT), (0, SCREEN_HEIGHT)])
+        self.renderer.draw_terrain(TERRAIN_SIZE)
         
         # Draw player
-        self.player.draw(self.screen)
+        self.player.draw(self.renderer)
         
         # Draw enemies
         for enemy in self.enemies:
-            enemy.draw(self.screen)
+            enemy.draw(self.renderer)
         
         # Draw bullets
         for bullet in self.bullets:
-            bullet.draw(self.screen)
+            bullet.draw(self.renderer)
         
-        for bullet in self.enemy_bullets:
-            bullet.draw(self.screen)
-        
-        # Draw UI
+        # Draw UI (switch to 2D mode)
         self.draw_ui()
+        
+        # Swap buffers
+        pygame.display.flip()
+    
+    def draw_ui(self):
+        """Draw 2D UI elements over 3D scene"""
+        # Save current matrices
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        glOrtho(0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, -1, 1)
+        
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+        
+        # Disable depth testing for UI
+        glDisable(GL_DEPTH_TEST)
+        glDisable(GL_LIGHTING)
+        
+        # Draw score
+        self.draw_text(f"Score: {self.score}", 10, 10, (1, 1, 1, 1))
+        
+        # Draw health bar
+        self.draw_health_bar()
+        
+        # Draw crosshair
+        self.draw_crosshair()
+        
+        # Draw controls
+        if not self.game_over:
+            self.draw_text("WASD: Move | QE: Turret | Mouse: Look | Space: Shoot", 10, SCREEN_HEIGHT - 30, (1, 1, 1, 1))
         
         # Draw game over screen
         if self.game_over:
             self.draw_game_over()
         
-        pygame.display.flip()
-    
-    def draw_ui(self):
-        """Draw user interface elements"""
-        # Score
-        score_text = self.font.render(f"Score: {self.score}", True, WHITE)
-        self.screen.blit(score_text, (10, 10))
+        # Draw pause screen
+        if self.paused:
+            self.draw_pause_screen()
         
-        # Health bar
-        health_width = 200
-        health_height = 20
-        health_x = 10
-        health_y = 50
+        # Restore matrices and settings
+        glEnable(GL_DEPTH_TEST)
+        glEnable(GL_LIGHTING)
+        
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+    
+    def draw_text(self, text, x, y, color):
+        """Draw text at given position"""
+        # Simple text rendering using OpenGL
+        glColor4f(*color)
+        glRasterPos2f(x, y)
+        
+        # Note: This is a simplified text rendering
+        # In a real implementation, you'd want to use texture-based text rendering
+        
+    def draw_health_bar(self):
+        """Draw player health bar"""
+        bar_width = 200
+        bar_height = 20
+        bar_x = 10
+        bar_y = 50
         
         # Background
-        pygame.draw.rect(self.screen, RED, (health_x, health_y, health_width, health_height))
+        glColor4f(0.8, 0.0, 0.0, 1.0)
+        glBegin(GL_QUADS)
+        glVertex2f(bar_x, bar_y)
+        glVertex2f(bar_x + bar_width, bar_y)
+        glVertex2f(bar_x + bar_width, bar_y + bar_height)
+        glVertex2f(bar_x, bar_y + bar_height)
+        glEnd()
         
         # Health
-        current_health_width = (self.player.health / self.player.max_health) * health_width
-        pygame.draw.rect(self.screen, GREEN, (health_x, health_y, current_health_width, health_height))
+        health_width = (self.player.health / self.player.max_health) * bar_width
+        glColor4f(0.0, 0.8, 0.0, 1.0)
+        glBegin(GL_QUADS)
+        glVertex2f(bar_x, bar_y)
+        glVertex2f(bar_x + health_width, bar_y)
+        glVertex2f(bar_x + health_width, bar_y + bar_height)
+        glVertex2f(bar_x, bar_y + bar_height)
+        glEnd()
         
         # Border
-        pygame.draw.rect(self.screen, WHITE, (health_x, health_y, health_width, health_height), 2)
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+        glBegin(GL_LINE_LOOP)
+        glVertex2f(bar_x, bar_y)
+        glVertex2f(bar_x + bar_width, bar_y)
+        glVertex2f(bar_x + bar_width, bar_y + bar_height)
+        glVertex2f(bar_x, bar_y + bar_height)
+        glEnd()
+    
+    def draw_crosshair(self):
+        """Draw crosshair in center of screen"""
+        center_x = SCREEN_WIDTH // 2
+        center_y = SCREEN_HEIGHT // 2
+        size = 10
         
-        # Health text
-        health_text = self.font.render(f"Health: {self.player.health}/{self.player.max_health}", True, WHITE)
-        self.screen.blit(health_text, (health_x, health_y + 25))
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+        glBegin(GL_LINES)
+        # Horizontal line
+        glVertex2f(center_x - size, center_y)
+        glVertex2f(center_x + size, center_y)
+        # Vertical line
+        glVertex2f(center_x, center_y - size)
+        glVertex2f(center_x, center_y + size)
+        glEnd()
     
     def draw_game_over(self):
         """Draw game over screen"""
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        overlay.set_alpha(128)
-        overlay.fill(BLACK)
-        self.screen.blit(overlay, (0, 0))
+        # Semi-transparent overlay
+        glColor4f(0.0, 0.0, 0.0, 0.7)
+        glBegin(GL_QUADS)
+        glVertex2f(0, 0)
+        glVertex2f(SCREEN_WIDTH, 0)
+        glVertex2f(SCREEN_WIDTH, SCREEN_HEIGHT)
+        glVertex2f(0, SCREEN_HEIGHT)
+        glEnd()
         
-        game_over_text = self.big_font.render("GAME OVER", True, WHITE)
-        score_text = self.font.render(f"Final Score: {self.score}", True, WHITE)
-        restart_text = self.font.render("Press R to Restart", True, WHITE)
+        # Game over text (simplified)
+        self.draw_text("GAME OVER", SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT//2 - 50, (1, 0, 0, 1))
+        self.draw_text(f"Final Score: {self.score}", SCREEN_WIDTH//2 - 80, SCREEN_HEIGHT//2, (1, 1, 1, 1))
+        self.draw_text("Press R to Restart or ESC to Quit", SCREEN_WIDTH//2 - 120, SCREEN_HEIGHT//2 + 50, (1, 1, 1, 1))
+    
+    def draw_pause_screen(self):
+        """Draw pause screen"""
+        # Semi-transparent overlay
+        glColor4f(0.0, 0.0, 0.0, 0.5)
+        glBegin(GL_QUADS)
+        glVertex2f(0, 0)
+        glVertex2f(SCREEN_WIDTH, 0)
+        glVertex2f(SCREEN_WIDTH, SCREEN_HEIGHT)
+        glVertex2f(0, SCREEN_HEIGHT)
+        glEnd()
         
-        # Center the text
-        self.screen.blit(game_over_text, 
-                        (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2, 
-                         SCREEN_HEIGHT // 2 - 100))
-        self.screen.blit(score_text, 
-                        (SCREEN_WIDTH // 2 - score_text.get_width() // 2, 
-                         SCREEN_HEIGHT // 2 - 50))
-        self.screen.blit(restart_text, 
-                        (SCREEN_WIDTH // 2 - restart_text.get_width() // 2, 
-                         SCREEN_HEIGHT // 2))
+        self.draw_text("PAUSED", SCREEN_WIDTH//2 - 50, SCREEN_HEIGHT//2, (1, 1, 1, 1))
+        self.draw_text("Press ESC to Resume", SCREEN_WIDTH//2 - 80, SCREEN_HEIGHT//2 + 30, (1, 1, 1, 1))
     
     def restart_game(self):
         """Restart the game"""
-        self.player = Tank(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100, PLAYER_COLOR)
+        self.player = Tank(0, 0, PLAYER_COLOR, is_player=True)
         self.enemies = []
         self.bullets = []
-        self.enemy_bullets = []
         self.score = 0
         self.enemy_spawn_timer = 0
         self.game_over = False
-        self.terrain = self.generate_terrain()
+        self.paused = False
+        
+        # Reset camera
+        self.camera_yaw = 0.0
+        self.camera_pitch = -0.3
+        
+        # Re-grab mouse
+        pygame.event.set_grab(True)
+        pygame.mouse.set_visible(False)
     
     def run(self):
         """Main game loop"""
         while self.running:
             self.handle_events()
             self.update()
-            self.draw()
+            self.render()
             self.clock.tick(FPS)
+        
+        pygame.quit()

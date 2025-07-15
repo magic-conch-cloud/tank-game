@@ -1,4 +1,4 @@
-# Game constants and configuration
+# Game constants and configuration for 3D War Thunder
 
 # Screen settings
 SCREEN_WIDTH = 1024
@@ -16,30 +16,53 @@ GRAY = (128, 128, 128)
 DARK_GRAY = (64, 64, 64)
 LIGHT_GRAY = (192, 192, 192)
 
-# Game colors
-SKY_COLOR = (135, 206, 235)  # Light blue sky
-GROUND_COLOR = (139, 69, 19)  # Brown ground
-PLAYER_COLOR = (0, 128, 0)   # Green player tank
-ENEMY_COLOR = (128, 0, 0)    # Red enemy tanks
-BULLET_COLOR = YELLOW
+# 3D World settings
+WORLD_SIZE = 200.0
+TERRAIN_SIZE = 100.0
+TERRAIN_HEIGHT = 5.0
+
+# Camera settings
+CAMERA_HEIGHT = 8.0
+CAMERA_DISTANCE = 15.0
+CAMERA_SPEED = 0.2
+MOUSE_SENSITIVITY = 0.002
 
 # Tank settings
-TANK_WIDTH = 30
-TANK_HEIGHT = 20
-TANK_SPEED = 3
-TANK_ROTATION_SPEED = 2
+TANK_WIDTH = 2.0
+TANK_LENGTH = 3.0
+TANK_HEIGHT = 1.5
+TANK_SPEED = 0.15
+TANK_ROTATION_SPEED = 0.02
+TURRET_ROTATION_SPEED = 0.03
 
 # Bullet settings
-BULLET_WIDTH = 4
-BULLET_HEIGHT = 8
-BULLET_SPEED = 8
+BULLET_SPEED = 1.0
 BULLET_DAMAGE = 25
 COLLISION_DAMAGE = 50
+BULLET_LIFETIME = 300  # frames
 
 # Game mechanics
-ENEMY_SPAWN_RATE = 180  # frames between enemy spawns
+ENEMY_SPAWN_RATE = 300  # frames between enemy spawns
 TANK_MAX_HEALTH = 100
 ENEMY_HEALTH = 50
+MAX_ENEMIES = 8
+
+# Physics
+GRAVITY = -0.01
+FRICTION = 0.95
+
+# Colors for 3D objects
+SKY_COLOR = [0.5, 0.7, 1.0, 1.0]  # Light blue sky
+GROUND_COLOR = [0.2, 0.8, 0.2, 1.0]  # Green ground
+PLAYER_COLOR = [0.0, 0.6, 0.0, 1.0]   # Dark green player tank
+ENEMY_COLOR = [0.8, 0.0, 0.0, 1.0]    # Red enemy tanks
+BULLET_COLOR = [1.0, 1.0, 0.0, 1.0]   # Yellow bullets
+EXPLOSION_COLOR = [1.0, 0.5, 0.0, 1.0]
+
+# Lighting
+AMBIENT_LIGHT = [0.3, 0.3, 0.3, 1.0]
+DIFFUSE_LIGHT = [0.8, 0.8, 0.8, 1.0]
+LIGHT_POSITION = [10.0, 20.0, 10.0, 1.0]
 
 # Input keys
 MOVE_LEFT_KEY = 'a'

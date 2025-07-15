@@ -1,0 +1,1 @@
+# Utils module for War Thunder Offline
