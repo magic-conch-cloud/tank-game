@@ -1,365 +1,455 @@
 import pygame
 from pygame.locals import *
-from OpenGL.GL import *
 import random
 import math
+import os
+import sys
+
+# Try to import OpenGL, but handle gracefully if not available
+try:
+    from OpenGL.GL import *
+    OPENGL_AVAILABLE = True
+except ImportError:
+    OPENGL_AVAILABLE = False
+    print("OpenGL not available, falling back to 2D mode")
+
 from entities.tank import Tank
 from entities.enemy import Enemy
 from entities.bullet import Bullet
 from utils.constants import *
 from utils.math3d import Vector3, distance_3d
-from utils.renderer import Renderer
+
+# Check if we're in a headless environment
+HEADLESS = os.environ.get('DISPLAY') is None
 
 class Game:
     def __init__(self):
         # Initialize Pygame
         pygame.init()
         
-        # Set up display with OpenGL
-        self.screen_size = (SCREEN_WIDTH, SCREEN_HEIGHT)
-        pygame.display.set_mode(self.screen_size, DOUBLEBUF | OPENGL)
-        pygame.display.set_caption("War Thunder Offline - 3D")
+        # Disable audio to avoid ALSA warnings in headless environments
+        pygame.mixer.quit()
         
-        # Hide mouse cursor and capture it
-        pygame.mouse.set_visible(False)
-        pygame.event.set_grab(True)
+        # Try to set up 3D mode, but fall back to 2D if it fails
+        self.mode_3d = False
         
-        # Initialize 3D renderer
-        self.renderer = Renderer()
-        self.renderer.setup_perspective(SCREEN_WIDTH, SCREEN_HEIGHT)
+        if OPENGL_AVAILABLE:
+            try:
+                print("Attempting to initialize 3D OpenGL mode...")
+                self.screen_size = (SCREEN_WIDTH, SCREEN_HEIGHT)
+                pygame.display.set_mode(self.screen_size, DOUBLEBUF | OPENGL)
+                
+                # Test if OpenGL actually works
+                glClear(GL_COLOR_BUFFER_BIT)
+                
+                print("3D OpenGL mode successful!")
+                self.mode_3d = True
+                
+                # Hide mouse cursor and capture it
+                pygame.mouse.set_visible(False)
+                pygame.event.set_grab(True)
+                
+                self.setup_opengl()
+                
+            except Exception as e:
+                print(f"3D mode failed ({e}), falling back to 2D mode")
+                self.mode_3d = False
+                # Reinitialize pygame display for 2D
+                pygame.display.quit()
+                pygame.display.init()
+                self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        else:
+            print("OpenGL not available, using 2D mode")
+            self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         
-        # Game state
+        pygame.display.set_caption("War Thunder Offline")
+        
         self.clock = pygame.time.Clock()
         self.running = True
-        self.game_over = False
-        self.paused = False
         
-        # Initialize game objects
+        # Game objects
         self.player = Tank(0, 0, PLAYER_COLOR, is_player=True)
         self.enemies = []
         self.bullets = []
         
-        # Game stats
+        # Game state
         self.score = 0
         self.enemy_spawn_timer = 0
+        self.game_over = False
         
-        # Camera system
-        self.camera_pos = Vector3(0, CAMERA_HEIGHT, -CAMERA_DISTANCE)
-        self.camera_target = Vector3(0, 0, 0)
-        self.camera_yaw = 0.0
-        self.camera_pitch = -0.3
+        # Camera for 3D mode
+        if self.mode_3d:
+            self.camera_pos = Vector3(0, CAMERA_HEIGHT, CAMERA_DISTANCE)
+            self.camera_rotation = Vector3(0, 0, 0)
+            self.mouse_locked = True
         
-        # Mouse control
-        self.mouse_sensitivity = MOUSE_SENSITIVITY
-        self.last_mouse_pos = pygame.mouse.get_pos()
+        # Fonts for 2D mode
+        if not self.mode_3d:
+            self.font = pygame.font.Font(None, 36)
+            self.big_font = pygame.font.Font(None, 72)
         
-        # UI
-        self.font_initialized = False
-        self.setup_ui()
+        print(f"Game initialized in {'3D' if self.mode_3d else '2D'} mode")
+    
+    def setup_opengl(self):
+        """Initialize OpenGL settings"""
+        glEnable(GL_DEPTH_TEST)
+        glEnable(GL_LIGHTING)
+        glEnable(GL_LIGHT0)
+        glEnable(GL_COLOR_MATERIAL)
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
         
-    def setup_ui(self):
-        """Setup UI rendering"""
-        pygame.font.init()
-        self.font = pygame.font.Font(None, 36)
-        self.big_font = pygame.font.Font(None, 72)
-        self.font_initialized = True
+        # Set up lighting
+        glLightfv(GL_LIGHT0, GL_AMBIENT, AMBIENT_LIGHT)
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, DIFFUSE_LIGHT)
+        glLightfv(GL_LIGHT0, GL_POSITION, LIGHT_POSITION)
+        
+        # Set clear color (sky)
+        glClearColor(*SKY_COLOR)
+        
+        # Set up perspective
+        self.setup_perspective()
+    
+    def setup_perspective(self):
+        """Set up 3D perspective projection"""
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        
+        # Set up perspective projection
+        from OpenGL.GLU import gluPerspective
+        gluPerspective(60, SCREEN_WIDTH / SCREEN_HEIGHT, 0.1, 1000.0)
+        
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
     
     def handle_events(self):
-        """Handle pygame events"""
+        """Handle input events"""
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            if event.type == QUIT:
                 self.running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    if self.game_over:
-                        self.running = False
-                    else:
-                        self.paused = not self.paused
-                        pygame.event.set_grab(not self.paused)
-                        pygame.mouse.set_visible(self.paused)
-                elif event.key == pygame.K_SPACE and not self.game_over and not self.paused:
-                    # Player shoots
-                    bullet = self.player.shoot()
-                    if bullet:
-                        self.bullets.append(bullet)
-                elif event.key == pygame.K_r and self.game_over:
-                    # Restart game
+            elif event.type == KEYDOWN:
+                if event.key == K_ESCAPE:
+                    self.running = False
+                elif event.key == K_r and self.game_over:
                     self.restart_game()
-            elif event.type == pygame.MOUSEMOTION and not self.paused:
-                # Mouse look
-                mouse_x, mouse_y = event.pos
-                rel_x, rel_y = event.rel
-                
-                self.camera_yaw += rel_x * self.mouse_sensitivity
-                self.camera_pitch -= rel_y * self.mouse_sensitivity
-                
-                # Clamp pitch
-                self.camera_pitch = max(-math.pi/2 + 0.1, min(math.pi/2 - 0.1, self.camera_pitch))
-    
-    def update(self):
-        """Update game state"""
-        if self.game_over or self.paused:
-            return
         
-        # Get pressed keys for continuous input
+        # Handle continuous key presses
         keys = pygame.key.get_pressed()
         
+        if not self.game_over:
+            # Movement
+            if keys[K_w]:
+                self.player.move_forward()
+            if keys[K_s]:
+                self.player.move_backward()
+            if keys[K_a]:
+                self.player.rotate_left()
+            if keys[K_d]:
+                self.player.rotate_right()
+            
+            # Turret control (only in 3D mode)
+            if self.mode_3d:
+                if keys[K_LEFT]:
+                    self.player.rotate_turret_left()
+                if keys[K_RIGHT]:
+                    self.player.rotate_turret_right()
+            
+            # Shooting
+            if keys[K_SPACE]:
+                bullet = self.player.shoot()
+                if bullet:
+                    self.bullets.append(bullet)
+        
+        # Mouse look (3D mode only)
+        if self.mode_3d and self.mouse_locked and not self.game_over:
+            mouse_rel = pygame.mouse.get_rel()
+            self.camera_rotation.y -= mouse_rel[0] * MOUSE_SENSITIVITY
+            self.camera_rotation.x -= mouse_rel[1] * MOUSE_SENSITIVITY
+            
+            # Clamp vertical rotation
+            self.camera_rotation.x = max(-1.5, min(1.5, self.camera_rotation.x))
+    
+    def update(self):
+        """Update game logic"""
+        if self.game_over:
+            return
+        
         # Update player
-        self.player.update(keys)
-        
-        # Update camera to follow player
-        self.update_camera()
-        
-        # Update bullets
-        for bullet in self.bullets[:]:
-            if bullet.update():
-                self.bullets.remove(bullet)
+        self.player.update()
         
         # Update enemies
         for enemy in self.enemies[:]:
             enemy.update(self.player.position)
+            bullet = enemy.try_shoot(self.player.position)
+            if bullet:
+                self.bullets.append(bullet)
             
-            # Enemy shooting
-            if enemy.should_shoot():
-                bullet = enemy.shoot()
-                if bullet:
-                    self.bullets.append(bullet)
+            # Remove dead enemies
+            if enemy.health <= 0:
+                self.enemies.remove(enemy)
+                self.score += 100
+        
+        # Update bullets
+        for bullet in self.bullets[:]:
+            bullet.update()
+            
+            # Remove bullets that are out of bounds or lifetime expired
+            if (bullet.position.y < -5 or 
+                abs(bullet.position.x) > WORLD_SIZE or 
+                abs(bullet.position.z) > WORLD_SIZE or
+                bullet.lifetime <= 0):
+                self.bullets.remove(bullet)
+                continue
+            
+            # Check collisions with tanks
+            if bullet.is_player_bullet:
+                # Check collision with enemies
+                for enemy in self.enemies[:]:
+                    if distance_3d(bullet.position, enemy.position) < 2.0:
+                        enemy.take_damage(BULLET_DAMAGE)
+                        if bullet in self.bullets:
+                            self.bullets.remove(bullet)
+                        break
+            else:
+                # Check collision with player
+                if distance_3d(bullet.position, self.player.position) < 2.0:
+                    self.player.take_damage(BULLET_DAMAGE)
+                    if bullet in self.bullets:
+                        self.bullets.remove(bullet)
         
         # Spawn enemies
         self.enemy_spawn_timer += 1
-        if self.enemy_spawn_timer >= ENEMY_SPAWN_RATE and len(self.enemies) < MAX_ENEMIES:
+        if self.enemy_spawn_timer >= ENEMY_SPAWN_RATE:
             self.spawn_enemy()
             self.enemy_spawn_timer = 0
         
-        # Check collisions
-        self.check_collisions()
+        # Check if player is dead
+        if self.player.health <= 0:
+            self.game_over = True
+        
+        # Update camera position (3D mode)
+        if self.mode_3d:
+            self.update_camera()
     
     def update_camera(self):
         """Update camera position to follow player"""
-        # Calculate camera position based on yaw and pitch
-        camera_distance = CAMERA_DISTANCE
-        
-        # Camera position relative to player
-        camera_x = math.sin(self.camera_yaw) * math.cos(self.camera_pitch) * camera_distance
-        camera_y = math.sin(self.camera_pitch) * camera_distance + CAMERA_HEIGHT
-        camera_z = math.cos(self.camera_yaw) * math.cos(self.camera_pitch) * camera_distance
-        
-        # Position camera relative to player
-        self.camera_pos = Vector3(
-            self.player.position.x + camera_x,
-            self.player.position.y + camera_y,
-            self.player.position.z + camera_z
+        # Camera follows player with offset
+        offset = Vector3(
+            math.sin(self.player.rotation) * CAMERA_DISTANCE,
+            CAMERA_HEIGHT,
+            math.cos(self.player.rotation) * CAMERA_DISTANCE
         )
-        
-        # Look at player
-        self.camera_target = Vector3(
-            self.player.position.x,
-            self.player.position.y + 1.0,
-            self.player.position.z
-        )
+        self.camera_pos = self.player.position + offset
     
     def spawn_enemy(self):
-        """Spawn a new enemy tank"""
-        # Spawn enemy at random position around the edge of the world
+        """Spawn a new enemy at a random position"""
         angle = random.uniform(0, 2 * math.pi)
-        distance = random.uniform(30, WORLD_SIZE / 2 - 10)
-        
-        x = math.sin(angle) * distance
-        z = math.cos(angle) * distance
+        distance = random.uniform(30, 60)
+        x = self.player.position.x + math.cos(angle) * distance
+        z = self.player.position.z + math.sin(angle) * distance
         
         enemy = Enemy(x, z)
         self.enemies.append(enemy)
     
-    def check_collisions(self):
-        """Check for collisions between objects"""
-        # Player bullets hitting enemies
-        for bullet in self.bullets[:]:
-            if bullet.is_player_bullet:
-                for enemy in self.enemies[:]:
-                    if bullet.check_collision(enemy):
-                        self.bullets.remove(bullet)
-                        if enemy.take_damage(BULLET_DAMAGE):
-                            self.enemies.remove(enemy)
-                            self.score += 100
-                        break
-            else:
-                # Enemy bullets hitting player
-                if bullet.check_collision(self.player):
-                    self.bullets.remove(bullet)
-                    if self.player.take_damage(BULLET_DAMAGE):
-                        self.game_over = True
-                    break
-        
-        # Enemies colliding with player
-        for enemy in self.enemies:
-            if self.player.check_collision(enemy):
-                if self.player.take_damage(COLLISION_DAMAGE):
-                    self.game_over = True
-                break
-    
     def render(self):
-        """Render the 3D scene"""
-        # Clear screen
-        self.renderer.clear_screen()
+        """Render the game"""
+        if self.mode_3d:
+            self.render_3d()
+        else:
+            self.render_2d()
+    
+    def render_3d(self):
+        """Render in 3D OpenGL mode"""
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glLoadIdentity()
         
-        # Set camera
-        self.renderer.set_camera(self.camera_pos, self.camera_target)
+        # Set up camera
+        from OpenGL.GLU import gluLookAt
+        look_target = Vector3(
+            self.camera_pos.x + math.sin(self.camera_rotation.y),
+            self.camera_pos.y + math.sin(self.camera_rotation.x),
+            self.camera_pos.z + math.cos(self.camera_rotation.y)
+        )
         
-        # Draw terrain
-        self.renderer.draw_terrain(TERRAIN_SIZE)
+        gluLookAt(
+            self.camera_pos.x, self.camera_pos.y, self.camera_pos.z,
+            look_target.x, look_target.y, look_target.z,
+            0, 1, 0
+        )
         
-        # Draw player
-        self.player.draw(self.renderer)
+        # Render terrain
+        self.render_terrain()
+        
+        # Render player
+        self.render_tank_3d(self.player)
+        
+        # Render enemies
+        for enemy in self.enemies:
+            self.render_tank_3d(enemy)
+        
+        # Render bullets
+        for bullet in self.bullets:
+            self.render_bullet_3d(bullet)
+        
+        pygame.display.flip()
+    
+    def render_2d(self):
+        """Render in 2D software mode"""
+        self.screen.fill(SKY_COLOR)
+        
+        # Simple 2D top-down view
+        center_x, center_y = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
+        
+        # Calculate screen positions relative to player
+        def world_to_screen(world_pos):
+            rel_x = world_pos.x - self.player.position.x
+            rel_z = world_pos.z - self.player.position.z
+            screen_x = center_x + rel_x * 10  # Scale factor
+            screen_y = center_y + rel_z * 10
+            return int(screen_x), int(screen_y)
+        
+        # Draw player (always in center)
+        pygame.draw.circle(self.screen, PLAYER_COLOR, (center_x, center_y), 15)
         
         # Draw enemies
         for enemy in self.enemies:
-            enemy.draw(self.renderer)
+            screen_pos = world_to_screen(enemy.position)
+            if 0 <= screen_pos[0] < SCREEN_WIDTH and 0 <= screen_pos[1] < SCREEN_HEIGHT:
+                pygame.draw.circle(self.screen, ENEMY_COLOR, screen_pos, 12)
         
         # Draw bullets
         for bullet in self.bullets:
-            bullet.draw(self.renderer)
+            screen_pos = world_to_screen(bullet.position)
+            if 0 <= screen_pos[0] < SCREEN_WIDTH and 0 <= screen_pos[1] < SCREEN_HEIGHT:
+                color = BULLET_COLOR if bullet.is_player_bullet else RED
+                pygame.draw.circle(self.screen, color, screen_pos, 3)
         
-        # Draw UI (switch to 2D mode)
-        self.draw_ui()
+        # Draw UI
+        self.render_ui_2d()
         
-        # Swap buffers
         pygame.display.flip()
     
-    def draw_ui(self):
-        """Draw 2D UI elements over 3D scene"""
-        # Save current matrices
-        glMatrixMode(GL_PROJECTION)
-        glPushMatrix()
-        glLoadIdentity()
-        glOrtho(0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, -1, 1)
-        
-        glMatrixMode(GL_MODELVIEW)
-        glPushMatrix()
-        glLoadIdentity()
-        
-        # Disable depth testing for UI
-        glDisable(GL_DEPTH_TEST)
-        glDisable(GL_LIGHTING)
-        
-        # Draw score
-        self.draw_text(f"Score: {self.score}", 10, 10, (1, 1, 1, 1))
-        
-        # Draw health bar
-        self.draw_health_bar()
-        
-        # Draw crosshair
-        self.draw_crosshair()
-        
-        # Draw controls
-        if not self.game_over:
-            self.draw_text("WASD: Move | QE: Turret | Mouse: Look | Space: Shoot", 10, SCREEN_HEIGHT - 30, (1, 1, 1, 1))
-        
-        # Draw game over screen
-        if self.game_over:
-            self.draw_game_over()
-        
-        # Draw pause screen
-        if self.paused:
-            self.draw_pause_screen()
-        
-        # Restore matrices and settings
-        glEnable(GL_DEPTH_TEST)
-        glEnable(GL_LIGHTING)
-        
-        glPopMatrix()
-        glMatrixMode(GL_PROJECTION)
-        glPopMatrix()
-        glMatrixMode(GL_MODELVIEW)
-    
-    def draw_text(self, text, x, y, color):
-        """Draw text at given position"""
-        # Simple text rendering using OpenGL
-        glColor4f(*color)
-        glRasterPos2f(x, y)
-        
-        # Note: This is a simplified text rendering
-        # In a real implementation, you'd want to use texture-based text rendering
-        
-    def draw_health_bar(self):
-        """Draw player health bar"""
-        bar_width = 200
-        bar_height = 20
-        bar_x = 10
-        bar_y = 50
+    def render_ui_2d(self):
+        """Render 2D UI elements"""
+        # Health bar
+        health_width = 200
+        health_height = 20
+        health_x = 10
+        health_y = 10
         
         # Background
-        glColor4f(0.8, 0.0, 0.0, 1.0)
-        glBegin(GL_QUADS)
-        glVertex2f(bar_x, bar_y)
-        glVertex2f(bar_x + bar_width, bar_y)
-        glVertex2f(bar_x + bar_width, bar_y + bar_height)
-        glVertex2f(bar_x, bar_y + bar_height)
-        glEnd()
+        pygame.draw.rect(self.screen, RED, (health_x, health_y, health_width, health_height))
         
         # Health
-        health_width = (self.player.health / self.player.max_health) * bar_width
-        glColor4f(0.0, 0.8, 0.0, 1.0)
-        glBegin(GL_QUADS)
-        glVertex2f(bar_x, bar_y)
-        glVertex2f(bar_x + health_width, bar_y)
-        glVertex2f(bar_x + health_width, bar_y + bar_height)
-        glVertex2f(bar_x, bar_y + bar_height)
-        glEnd()
+        health_ratio = max(0, self.player.health / self.player.max_health)
+        pygame.draw.rect(self.screen, GREEN, (health_x, health_y, health_width * health_ratio, health_height))
         
-        # Border
-        glColor4f(1.0, 1.0, 1.0, 1.0)
-        glBegin(GL_LINE_LOOP)
-        glVertex2f(bar_x, bar_y)
-        glVertex2f(bar_x + bar_width, bar_y)
-        glVertex2f(bar_x + bar_width, bar_y + bar_height)
-        glVertex2f(bar_x, bar_y + bar_height)
+        # Score
+        score_text = self.font.render(f"Score: {self.score}", True, WHITE)
+        self.screen.blit(score_text, (10, 40))
+        
+        # Enemy count
+        enemy_text = self.font.render(f"Enemies: {len(self.enemies)}", True, WHITE)
+        self.screen.blit(enemy_text, (10, 70))
+        
+        # Game over screen
+        if self.game_over:
+            game_over_text = self.big_font.render("GAME OVER", True, RED)
+            restart_text = self.font.render("Press R to restart", True, WHITE)
+            
+            text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 60))
+            
+            self.screen.blit(game_over_text, text_rect)
+            self.screen.blit(restart_text, restart_rect)
+    
+    def render_terrain(self):
+        """Render 3D terrain"""
+        glColor3f(0.4, 0.6, 0.2)  # Green ground color
+        glBegin(GL_QUADS)
+        size = TERRAIN_SIZE
+        glVertex3f(-size, 0, -size)
+        glVertex3f(size, 0, -size)
+        glVertex3f(size, 0, size)
+        glVertex3f(-size, 0, size)
         glEnd()
     
-    def draw_crosshair(self):
-        """Draw crosshair in center of screen"""
-        center_x = SCREEN_WIDTH // 2
-        center_y = SCREEN_HEIGHT // 2
-        size = 10
+    def render_tank_3d(self, tank):
+        """Render a 3D tank"""
+        glPushMatrix()
         
-        glColor4f(1.0, 1.0, 1.0, 1.0)
-        glBegin(GL_LINES)
-        # Horizontal line
-        glVertex2f(center_x - size, center_y)
-        glVertex2f(center_x + size, center_y)
-        # Vertical line
-        glVertex2f(center_x, center_y - size)
-        glVertex2f(center_x, center_y + size)
-        glEnd()
+        # Move to tank position
+        glTranslatef(tank.position.x, tank.position.y, tank.position.z)
+        glRotatef(math.degrees(tank.rotation), 0, 1, 0)
+        
+        # Set color
+        glColor3f(*[c/255 for c in tank.color])
+        
+        # Draw tank hull (simple box)
+        glPushMatrix()
+        glScalef(TANK_LENGTH, TANK_HEIGHT, TANK_WIDTH)
+        self.draw_cube()
+        glPopMatrix()
+        
+        # Draw turret
+        glPushMatrix()
+        glTranslatef(0, TANK_HEIGHT * 0.7, 0)
+        glRotatef(math.degrees(tank.turret_rotation), 0, 1, 0)
+        glScalef(TANK_LENGTH * 0.8, TANK_HEIGHT * 0.6, TANK_WIDTH * 0.8)
+        self.draw_cube()
+        glPopMatrix()
+        
+        glPopMatrix()
     
-    def draw_game_over(self):
-        """Draw game over screen"""
-        # Semi-transparent overlay
-        glColor4f(0.0, 0.0, 0.0, 0.7)
-        glBegin(GL_QUADS)
-        glVertex2f(0, 0)
-        glVertex2f(SCREEN_WIDTH, 0)
-        glVertex2f(SCREEN_WIDTH, SCREEN_HEIGHT)
-        glVertex2f(0, SCREEN_HEIGHT)
-        glEnd()
-        
-        # Game over text (simplified)
-        self.draw_text("GAME OVER", SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT//2 - 50, (1, 0, 0, 1))
-        self.draw_text(f"Final Score: {self.score}", SCREEN_WIDTH//2 - 80, SCREEN_HEIGHT//2, (1, 1, 1, 1))
-        self.draw_text("Press R to Restart or ESC to Quit", SCREEN_WIDTH//2 - 120, SCREEN_HEIGHT//2 + 50, (1, 1, 1, 1))
+    def render_bullet_3d(self, bullet):
+        """Render a 3D bullet"""
+        glPushMatrix()
+        glTranslatef(bullet.position.x, bullet.position.y, bullet.position.z)
+        glColor3f(*[c/255 for c in bullet.color])
+        glScalef(0.2, 0.2, 0.2)
+        self.draw_cube()
+        glPopMatrix()
     
-    def draw_pause_screen(self):
-        """Draw pause screen"""
-        # Semi-transparent overlay
-        glColor4f(0.0, 0.0, 0.0, 0.5)
+    def draw_cube(self):
+        """Draw a simple cube"""
         glBegin(GL_QUADS)
-        glVertex2f(0, 0)
-        glVertex2f(SCREEN_WIDTH, 0)
-        glVertex2f(SCREEN_WIDTH, SCREEN_HEIGHT)
-        glVertex2f(0, SCREEN_HEIGHT)
-        glEnd()
         
-        self.draw_text("PAUSED", SCREEN_WIDTH//2 - 50, SCREEN_HEIGHT//2, (1, 1, 1, 1))
-        self.draw_text("Press ESC to Resume", SCREEN_WIDTH//2 - 80, SCREEN_HEIGHT//2 + 30, (1, 1, 1, 1))
+        # Front face
+        glVertex3f(-0.5, -0.5, 0.5)
+        glVertex3f(0.5, -0.5, 0.5)
+        glVertex3f(0.5, 0.5, 0.5)
+        glVertex3f(-0.5, 0.5, 0.5)
+        
+        # Back face
+        glVertex3f(-0.5, -0.5, -0.5)
+        glVertex3f(-0.5, 0.5, -0.5)
+        glVertex3f(0.5, 0.5, -0.5)
+        glVertex3f(0.5, -0.5, -0.5)
+        
+        # Top face
+        glVertex3f(-0.5, 0.5, -0.5)
+        glVertex3f(-0.5, 0.5, 0.5)
+        glVertex3f(0.5, 0.5, 0.5)
+        glVertex3f(0.5, 0.5, -0.5)
+        
+        # Bottom face
+        glVertex3f(-0.5, -0.5, -0.5)
+        glVertex3f(0.5, -0.5, -0.5)
+        glVertex3f(0.5, -0.5, 0.5)
+        glVertex3f(-0.5, -0.5, 0.5)
+        
+        # Right face
+        glVertex3f(0.5, -0.5, -0.5)
+        glVertex3f(0.5, 0.5, -0.5)
+        glVertex3f(0.5, 0.5, 0.5)
+        glVertex3f(0.5, -0.5, 0.5)
+        
+        # Left face
+        glVertex3f(-0.5, -0.5, -0.5)
+        glVertex3f(-0.5, -0.5, 0.5)
+        glVertex3f(-0.5, 0.5, 0.5)
+        glVertex3f(-0.5, 0.5, -0.5)
+        
+        glEnd()
     
     def restart_game(self):
         """Restart the game"""
@@ -369,22 +459,21 @@ class Game:
         self.score = 0
         self.enemy_spawn_timer = 0
         self.game_over = False
-        self.paused = False
-        
-        # Reset camera
-        self.camera_yaw = 0.0
-        self.camera_pitch = -0.3
-        
-        # Re-grab mouse
-        pygame.event.set_grab(True)
-        pygame.mouse.set_visible(False)
     
     def run(self):
         """Main game loop"""
+        print("Starting game loop...")
+        print("Controls:")
+        print("- WASD: Move")
+        print("- Arrow keys: Turret (3D mode)")
+        print("- Space: Shoot")
+        print("- Escape: Quit")
+        print("- R: Restart (when game over)")
+        
         while self.running:
             self.handle_events()
             self.update()
             self.render()
             self.clock.tick(FPS)
         
-        pygame.quit()
+        print("Game ended.")

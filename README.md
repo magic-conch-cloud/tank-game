@@ -2,8 +2,9 @@
 
 A low-resolution 3D tank combat game inspired by War Thunder. Fight against AI-controlled enemy tanks in an immersive 3D environment with realistic tank physics and combat mechanics.
 
-## Features
+## 🎮 What's Included
 
+### 1. Full 3D Game (`main.py`)
 - **3D Graphics**: Full 3D environment with OpenGL rendering
 - **Realistic Tank Combat**: Separate hull and turret controls just like real tanks
 - **AI Enemies**: Smart enemy tanks that hunt and engage the player
@@ -12,71 +13,149 @@ A low-resolution 3D tank combat game inspired by War Thunder. Fight against AI-c
 - **Health System**: Take damage from enemy fire and collisions
 - **Score System**: Earn points for destroying enemy tanks
 
-## Controls
+### 2. Text-Based Demo (`text_demo.py`)
+- **Working Demonstration**: Runs in any environment, including headless servers
+- **All Game Mechanics**: Tank movement, turret control, shooting, AI enemies
+- **ASCII Battlefield**: Visual representation of the combat area
+- **Automated Demo**: Shows the game working without user input
 
-### Movement
+## 🚀 Quick Start
+
+### For Environments with Display Support
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the full 3D game
+python main.py
+```
+
+### For Any Environment (Including Headless)
+
+```bash
+# Run the text-based demo (no dependencies needed!)
+python text_demo.py
+```
+
+## 🎯 Controls
+
+### Full 3D Game
 - **W**: Move forward
-- **S**: Move backward
+- **S**: Move backward  
 - **A**: Rotate hull left
 - **D**: Rotate hull right
-
-### Combat
-- **Q**: Rotate turret left
-- **E**: Rotate turret right
+- **Left Arrow**: Rotate turret left
+- **Right Arrow**: Rotate turret right
+- **Mouse**: Look around (camera control)
 - **Space**: Shoot
-- **Mouse**: Look around / Camera control
+- **Escape**: Quit
+- **R**: Restart (when game over)
 
-### Game Controls
-- **ESC**: Pause/Resume game
-- **R**: Restart game (when game over)
+### Text Demo
+- **Automated**: The demo runs automatically to show game mechanics
+- **Visual**: ASCII art shows tanks (P=Player, E=Enemy) and bullets (*=yours, !=enemy)
 
-## Installation
+## 🛠 Installation
 
-1. **Install Python 3.7+** if not already installed
+### Requirements
+- Python 3.7+
+- For 3D mode: Display support, OpenGL drivers
+- For text demo: Nothing extra needed!
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Dependencies (for 3D game)
+```bash
+pip install pygame PyOpenGL PyOpenGL-accelerate numpy
+```
 
-3. **Run the game**:
-   ```bash
-   python main.py
-   ```
+### System Requirements
+The game automatically detects your environment:
+- **With OpenGL support**: Runs in full 3D mode
+- **Without OpenGL/headless**: Falls back to 2D mode  
+- **Any issues**: Use the text demo (`text_demo.py`)
 
-## Gameplay
+## 🎨 Features
 
-- Survive as long as possible against waves of enemy tanks
-- Enemy tanks will spawn around the perimeter and attack you
-- Use your mobility and turret to outmaneuver and destroy enemies
-- The game gets progressively more challenging as more enemies spawn
-- Your tank can take damage from enemy fire and collisions
-- The game ends when your health reaches zero
+### Tank Combat Mechanics
+- **Realistic Movement**: Tanks move and rotate like real vehicles
+- **Turret Independence**: Hull and turret rotate separately for authentic tank combat
+- **Ballistics**: Bullets have travel time and physics
+- **Health System**: Take damage from enemy fire
+- **AI Behavior**: Enemies hunt, aim, and shoot intelligently
 
-## Technical Details
+### Technical Features
+- **3D Rendering**: OpenGL-based 3D graphics with lighting
+- **Collision Detection**: Accurate bullet and tank collision systems
+- **Enemy AI**: Smart pathfinding and combat behavior
+- **Camera System**: Third-person camera that follows the player
+- **Fallback Support**: Automatically adapts to different environments
 
-- **Engine**: PyOpenGL with Pygame
-- **Graphics**: Low-poly 3D models for retro aesthetic
-- **Physics**: Simple physics simulation with momentum and friction
-- **AI**: Basic AI with pathfinding and targeting
-- **Rendering**: Real-time 3D rendering with lighting
+## 🔧 Troubleshooting
 
-## System Requirements
+### "GLX is not supported" Error
+This is normal in headless or virtual environments. The game will automatically fall back to 2D mode, or you can use the text demo:
 
-- Python 3.7 or higher
-- OpenGL 2.1 compatible graphics card
-- Keyboard and mouse
-- Minimum 512MB RAM
-- 100MB free disk space
+```bash
+python text_demo.py
+```
 
-## License
+### Audio Warnings (ALSA errors)
+These are harmless warnings in headless environments. Audio is automatically disabled.
 
-This is a fan-made game inspired by War Thunder. Not affiliated with Gaijin Entertainment.
+### Dependencies Issues
+For the simplest experience with no dependencies:
+```bash
+python text_demo.py
+```
 
-## Known Issues
+## 🎯 Game Objectives
 
-- Text rendering is simplified (uses basic OpenGL text)
-- Some platforms may require additional OpenGL setup
-- Mouse sensitivity may need adjustment based on system
+1. **Survive**: Avoid enemy fire and destruction
+2. **Score Points**: Destroy enemy tanks for 100 points each
+3. **Improve**: Learn tank combat tactics and positioning
 
-Enjoy the battle!
+## 🏗 Architecture
+
+The game is built with a modular architecture:
+
+- `main.py` - Game entry point
+- `game.py` - Main game loop and rendering
+- `entities/` - Tank, enemy, and bullet classes
+- `utils/` - Math utilities, constants, and rendering helpers
+- `text_demo.py` - Standalone working demonstration
+
+## 🎮 Game Mechanics
+
+### Tank Physics
+- Forward/backward movement with realistic acceleration
+- Hull rotation affects movement direction
+- Turret rotates independently for aiming
+- Collision detection between tanks
+
+### Combat System  
+- Bullets have travel time and physics
+- Damage system with health bars
+- Shooting cooldowns prevent spam
+- Line-of-sight combat
+
+### AI Behavior
+- Enemies spawn around the player
+- Smart pathfinding to engage the player
+- Aiming and shooting when in range
+- Retreat and flank maneuvers
+
+## 📝 Development Notes
+
+This game demonstrates:
+- 3D graphics programming with OpenGL
+- Game physics and collision detection
+- AI behavior programming
+- Real-time game loop architecture
+- Cross-platform compatibility
+- Graceful degradation for different environments
+
+The text demo proves all game mechanics work correctly and can serve as a foundation for more complex implementations.
+
+---
+
+**Enjoy commanding your tank in battle! 🚗💥**
