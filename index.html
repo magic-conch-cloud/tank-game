@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thunder Tanks - Offline War Thunder</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <div class="hud">
+            <div class="health-bar">
+                <div class="health-label">Health:</div>
+                <div class="health-fill" id="healthBar"></div>
+            </div>
+            <div class="score">Score: <span id="score">0</span></div>
+            <div class="enemies">Enemies: <span id="enemyCount">5</span></div>
+        </div>
+        
+        <canvas id="gameCanvas" width="1000" height="600"></canvas>
+        
+        <div class="controls">
+            <div class="control-section">
+                <h3>Controls:</h3>
+                <p><strong>WASD</strong> - Move tank</p>
+                <p><strong>Mouse</strong> - Aim turret</p>
+                <p><strong>Left Click</strong> - Fire cannon</p>
+                <p><strong>R</strong> - Restart game</p>
+            </div>
+        </div>
+        
+        <div class="game-over" id="gameOver" style="display: none;">
+            <h2 id="gameOverText">Game Over!</h2>
+            <button onclick="restartGame()">Play Again</button>
+        </div>
+    </div>
+    
+    <script src="game.js"></script>
+</body>
+</html>
